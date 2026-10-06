@@ -38,7 +38,7 @@ if not gemini_key:
     st.stop()
 
 # ---------------------------------------------------------
-# YouTube Helpers & Frame Extractor
+# YouTube Helpers & Robust Frame Extractor
 # ---------------------------------------------------------
 def extract_video_id(url: str) -> str:
     pattern = r"(?:v=|\/|youtu\.be\/|embed\/)([0-9A-Za-z_-]{11})"
@@ -68,20 +68,31 @@ def get_transcript(url: str) -> str:
 def extract_action_frames(youtube_url: str, num_frames: int = 4):
     """Streams video stream directly and extracts evenly spaced crisp frames."""
     ydl_opts = {
-        'format': 'best[height<=1080]/best',
+        'format': 'bestvideo[ext=mp4]/bestvideo/best[ext=mp4]/best/worst',
         'quiet': True,
-        'no_warnings': True
+        'no_warnings': True,
+        'noplaylist': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(youtube_url, download=False)
-        stream_url = info['url']
+        stream_url = info.get('url')
+        
+        if not stream_url and 'requested_formats' in info:
+            stream_url = info['requested_formats'][0].get('url')
+        elif not stream_url and 'formats' in info:
+            stream_url = info['formats'][-1].get('url')
+
+    if not stream_url:
+        raise ValueError("Could not find a playable video stream URL.")
 
     cap = cv2.VideoCapture(stream_url)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    if total_frames <= 0:
+        total_frames = 1000
+
     extracted = []
-    # Sample between 12% and 85% into footage to skip intro/outro screens
-    sample_points = np.linspace(total_frames * 0.12, total_frames * 0.85, num_frames, dtype=int)
+    sample_points = np.linspace(total_frames * 0.15, total_frames * 0.80, num_frames, dtype=int)
 
     for idx in sample_points:
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
@@ -92,6 +103,10 @@ def extract_action_frames(youtube_url: str, num_frames: int = 4):
             extracted.append(img)
 
     cap.release()
+
+    if not extracted:
+        raise RuntimeError("No frames could be extracted from the video stream.")
+
     return extracted
 
 # ---------------------------------------------------------
@@ -99,15 +114,13 @@ def extract_action_frames(youtube_url: str, num_frames: int = 4):
 # ---------------------------------------------------------
 def create_canva_design_with_asset(image: Image.Image, token: str, design_title: str = "YouTube Thumbnail"):
     """
-    1. Uploads the image (video frame or photo) directly to the user's Canva Asset Library.
-    2. Creates a 1280x720 YouTube Thumbnail design in Canva.
-    Returns the Canva direct edit URL and asset details.
+    1. Uploads the image directly to Canva Asset Library.
+    2. Creates a 1280x720 YouTube Thumbnail design.
     """
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     buf.seek(0)
 
-    # Step 1: Upload Asset to Canva
     upload_url = "https://api.canva.com/rest/v1/asset-uploads"
     name_encoded = base64.b64encode(design_title.encode("utf-8")).decode("utf-8")
     upload_headers = {
@@ -123,7 +136,6 @@ def create_canva_design_with_asset(image: Image.Image, token: str, design_title:
     asset_data = up_res.json()
     asset_id = asset_data.get("asset", {}).get("id")
 
-    # Step 2: Create Canva 1280x720 Thumbnail Design
     design_url = "https://api.canva.com/rest/v1/designs"
     design_headers = {
         "Authorization": f"Bearer {token}",
@@ -139,15 +151,14 @@ def create_canva_design_with_asset(image: Image.Image, token: str, design_title:
 
     des_res = requests.post(design_url, headers=design_headers, json=payload)
     if des_res.status_code not in [200, 201]:
-        # Fallback to direct Canva edit link if scope differs
-        edit_url = f"https://www.canva.com/create/youtube-thumbnails/"
+        edit_url = "https://www.canva.com/create/youtube-thumbnails/"
     else:
         edit_url = des_res.json().get("design", {}).get("urls", {}).get("edit_url", "https://www.canva.com/create/youtube-thumbnails/")
 
     return edit_url, asset_id
 
 # ---------------------------------------------------------
-# High-CTR Local Rendering Engine (Mobile Pop & Telugu Font)
+# High-CTR Local Rendering Engine
 # ---------------------------------------------------------
 def apply_ctr_color_grade(pil_img: Image.Image) -> Image.Image:
     w, h = pil_img.size
