@@ -1,0 +1,24 @@
+# Virtual Environment
+venv/
+ENV/
+env/
+# Python Cache
+__pycache__/
+*.py[cod]
+*.class
+# ChromaDB Vector Storage (Local binary data)
+chroma_db_langchain/
+# Streamlit Local Cache
+.streamlit/
+# Temporary video and image exports
+*.mp4
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.csv
+*.txt
+# Node / Canva modules
+node_modules/
+dist/
+.env
